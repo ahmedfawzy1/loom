@@ -1,0 +1,49 @@
+{
+  "name": "@loom/api",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/main",
+  "scripts": {
+    "build": "nest build",
+    "typecheck": "tsc --noEmit -p tsconfig.build.json",
+    "dev": "nest start --watch",
+    "start": "node .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write ."
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1135.0",
+    "@aws-sdk/s3-presigned-post": "^3.1135.0",
+    "@aws-sdk/s3-request-presigner": "^3.1135.0",
+    "@loom/database": "workspace:^",
+    "@loom/dto": "workspace:^",
+    "@modelcontextprotocol/node": "^2.1.2",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "@nestjs/common": "^11.0.7",
+    "@nestjs/config": "^4.0.1",
+    "@nestjs/core": "^11.0.7",
+    "@nestjs/platform-express": "^11.0.7",
+    "@nestjs/throttler": "^6.4.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "reflect-metadata": "~0.2.2",
+    "rxjs": "^7.8.2",
+    "sharp": "^0.34.5",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.2",
+    "@nestjs/schematics": "^11.0.0",
+    "@swc/core": "^1.16.2",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.0",
+    "typescript": "catalog:",
+    "unplugin-swc": "^1.6.0",
+    "vitest": "^3.2.4"
+  }
+}

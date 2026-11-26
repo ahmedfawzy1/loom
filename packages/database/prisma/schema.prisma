@@ -1,0 +1,868 @@
+// Every content type follows the same three-table shape:
+//   canonical  identity, relations, media refs, soft delete
+//   *Locale    text fields, publish state, review state, revision
+//   *Version   immutable JSON snapshot of a locale row at one save
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../generated/client"
+  binaryTargets   = ["native", "rhel-openssl-3.0.x"]
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("CMS_DATABASE_URL")
+  // Trigram matching for the global search: fuzzy and ranked, in every language
+  extensions = [pg_trgm]
+}
+
+enum CmsRole {
+  ADMIN
+  AUTHOR
+  WRITER
+}
+
+enum CmsUserStatus {
+  // Invited, and has not chosen a password yet, so cannot sign in
+  PENDING
+  ACTIVE
+  DISABLED
+}
+
+enum LocaleStatus {
+  DRAFT
+  IN_REVIEW
+  PUBLISHED
+  CHANGED
+  UNPUBLISHED
+}
+
+enum CmsContentType {
+  BLOG
+  CATEGORY
+  TAG
+  AUTHOR
+  CTA
+  FEATURED_ARTICLES
+}
+
+enum AuditAction {
+  CONTENT_CREATED
+  CONTENT_EDITED
+  CONTENT_SUBMITTED
+  CONTENT_APPROVED
+  CONTENT_CHANGES_REQUESTED
+  CONTENT_PUBLISHED
+  CONTENT_UNPUBLISHED
+  CONTENT_TRANSLATED
+  CONTENT_DUPLICATED
+  CONTENT_TRASHED
+  CONTENT_RESTORED
+  CONTENT_DELETED
+  VERSION_RESTORED
+  MEDIA_UPLOADED
+  MEDIA_EDITED
+  MEDIA_REPLACED
+  MEDIA_DELETED
+  MEDIA_RESTORED
+  USER_ROLE_CHANGED
+  USER_DISABLED
+  USER_REACTIVATED
+  USER_DELETED
+  SITE_CREATED
+  SITE_UPDATED
+  SITE_DELETED
+  SPACE_CREATED
+  SPACE_RENAMED
+  SPACE_CLONED
+  SPACE_DELETED
+  SETTINGS_CHANGED
+  API_KEY_CREATED
+  API_KEY_REVOKED
+  PAGES_REFRESHED
+  MCP_TOKEN_CREATED
+  MCP_TOKEN_REVOKED
+  USER_INVITED
+  USER_PASSWORD_RESET
+}
+
+// Accounts are invite-only. An Admin adds a person with an email and a role, and the row stays
+// PENDING until that person chooses a password through the one-time link the Admin sends them.
+// Emails are stored lowercased, so one address cannot become two accounts.
+model CmsUser {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String?
+  role         CmsRole
+  status       CmsUserStatus @default(PENDING)
+  createdAt    DateTime      @default(now())
+  // Null until the person first signs in
+  lastActiveAt DateTime?
+
+  password     CmsPassword?
+  passwordLink CmsPasswordLink?
+  sessions     CmsSession[]
+
+  auditLogs        AuditLog[]
+  uploadedMedia    Media[]
+  pendingUploads   PendingUpload[]
+  createdApiKeys   ApiKey[]
+  mcpTokens        McpToken[]
+  translationUsage TranslationUsage[]
+
+  // Content attribution. SetNull on delete, so removing a person keeps their content intact;
+  // the audit log keeps their email flat so history stays readable.
+  createdBlogs                     Blog[]                   @relation("BlogCreatedBy")
+  createdCategories                Category[]               @relation("CategoryCreatedBy")
+  createdTags                      Tag[]                    @relation("TagCreatedBy")
+  createdAuthors                   Author[]                 @relation("AuthorCreatedBy")
+  createdCtas                      Cta[]                    @relation("CtaCreatedBy")
+  createdFeaturedArticles          FeaturedArticles[]       @relation("FeaturedArticlesCreatedBy")
+  submittedBlogLocales             BlogLocale[]             @relation("BlogLocaleSubmittedBy")
+  reviewedBlogLocales              BlogLocale[]             @relation("BlogLocaleReviewedBy")
+  submittedCategoryLocales         CategoryLocale[]         @relation("CategoryLocaleSubmittedBy")
+  reviewedCategoryLocales          CategoryLocale[]         @relation("CategoryLocaleReviewedBy")
+  submittedTagLocales              TagLocale[]              @relation("TagLocaleSubmittedBy")
+  reviewedTagLocales               TagLocale[]              @relation("TagLocaleReviewedBy")
+  submittedAuthorLocales           AuthorLocale[]           @relation("AuthorLocaleSubmittedBy")
+  reviewedAuthorLocales            AuthorLocale[]           @relation("AuthorLocaleReviewedBy")
+  submittedCtaLocales              CtaLocale[]              @relation("CtaLocaleSubmittedBy")
+  reviewedCtaLocales               CtaLocale[]              @relation("CtaLocaleReviewedBy")
+  submittedFeaturedArticlesLocales FeaturedArticlesLocale[] @relation("FeaturedArticlesLocaleSubmittedBy")
+  reviewedFeaturedArticlesLocales  FeaturedArticlesLocale[] @relation("FeaturedArticlesLocaleReviewedBy")
+
+  @@index([status])
+}
+
+/// A person's password, kept out of CmsUser so that loading a user — which most of the API does —
+/// never loads the hash with it. Only the auth module reads this table.
+model CmsPassword {
+  userId    String   @id
+  /// scrypt, with its parameters in the string — see packages/database/src/credentials.ts
+  hash      String
+  updatedAt DateTime @updatedAt
+
+  user CmsUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// The one-time link that lets a person choose a password: the invite an Admin sends a new user, or
+/// a reset. Only a hash of its token is stored. A person has at most one — making another replaces
+/// it, and using it deletes it.
+model CmsPasswordLink {
+  userId    String   @id
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user CmsUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// A signed-in browser. Its cookie carries a random token and only the token's hash is stored, so
+/// nothing in this table can be used to sign in. It ends on sign-out, after a month unused, when its
+/// person chooses a new password, or when they are disabled or deleted.
+model CmsSession {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  lastUsedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  user CmsUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Site {
+  id               String   @id @default(cuid())
+  name             String
+  slug             String   @unique
+  domain           String
+  defaultLanguage  String   @default("en")
+  protectedTerms   String[] @default([])
+  revalidateUrl    String?
+  revalidateSecret String?
+  /// Where the editor's Preview button sends people: the website's route that turns on draft mode.
+  /// Loom appends `?token=…`, which the website resolves through the Content API.
+  previewUrl       String?
+  /// Signs preview tokens (HMAC). Made the first time a link is issued and never sent anywhere, so
+  /// replacing it invalidates every outstanding link at once.
+  previewSecret    String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  languages        SiteLanguage[]
+  spaces           Space[]
+  apiKeys          ApiKey[]
+  translationUsage TranslationUsage[]
+}
+
+model SiteLanguage {
+  id         String  @id @default(cuid())
+  siteId     String
+  code       String
+  label      String
+  nativeName String
+  deeplCode  String?
+  urlPrefix  String
+  rtl        Boolean @default(false)
+  enabled    Boolean @default(true)
+  position   Int
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, code])
+  @@index([siteId, enabled])
+}
+
+model Space {
+  id        String   @id @default(cuid())
+  siteId    String
+  name      String
+  slug      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  blogs            Blog[]
+  categories       Category[]
+  tags             Tag[]
+  authors          Author[]
+  ctas             Cta[]
+  featuredArticles FeaturedArticles[]
+
+  blogLocales             BlogLocale[]
+  categoryLocales         CategoryLocale[]
+  tagLocales              TagLocale[]
+  authorLocales           AuthorLocale[]
+  ctaLocales              CtaLocale[]
+  featuredArticlesLocales FeaturedArticlesLocale[]
+
+  @@unique([siteId, slug])
+  @@unique([siteId, name])
+}
+
+// One global library, not Site-scoped: a Space clone points at the same S3 objects rather than
+// copying them. Deleted for real, not soft-deleted — MediaService refuses while anything still
+// uses the image, including embeds inside a post body, so a delete never leaves a broken reference.
+model Media {
+  id           String    @id @default(cuid())
+  s3Key        String    @unique
+  filename     String
+  altText      String    @default("")
+  mimeType     String
+  width        Int
+  height       Int
+  sizeBytes    Int
+  uploadedById String?
+  createdAt    DateTime  @default(now())
+  // Hidden from the library and pickers only. The object stays, so content and version snapshots
+  // still pointing at it keep rendering, and a restore needs nothing but this column cleared.
+  deletedAt    DateTime?
+
+  uploadedBy CmsUser? @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  blogImages            Blog[]     @relation("BlogImage")
+  categoryFeaturedImage Category[] @relation("CategoryFeaturedImage")
+  categoryFeatureIcon   Category[] @relation("CategoryFeatureIcon")
+  categoryGameCover     Category[] @relation("CategoryGameCover")
+  tagFeaturedImage      Tag[]      @relation("TagFeaturedImage")
+  authorProfileImage    Author[]   @relation("AuthorProfileImage")
+  ctaImage              Cta[]      @relation("CtaImage")
+
+  @@index([deletedAt, createdAt])
+}
+
+/// An upload URL handed out but not yet confirmed. Confirm and Replace accept only a key listed
+/// here for the same user, so neither can be pointed at an object someone else uploaded — or at a
+/// live image, which sits under media/ and is never a pending key.
+model PendingUpload {
+  key          String   @id
+  mimeType     String
+  uploadedById String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  uploadedBy CmsUser @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+}
+
+model Blog {
+  id          String    @id @default(cuid())
+  spaceId     String
+  authorId    String
+  reviewerId  String?
+  categoryId  String?
+  imageId     String?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  space    Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  author   Author    @relation("BlogAuthor", fields: [authorId], references: [id])
+  reviewer Author?   @relation("BlogReviewer", fields: [reviewerId], references: [id])
+  category Category? @relation(fields: [categoryId], references: [id])
+  image    Media?    @relation("BlogImage", fields: [imageId], references: [id])
+
+  tags          BlogTag[]
+  locales       BlogLocale[]
+  featuredItems FeaturedArticlesItem[]
+
+  createdBy CmsUser? @relation("BlogCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([spaceId, deletedAt])
+  @@index([categoryId])
+  @@index([authorId])
+  @@index([reviewerId])
+}
+
+model BlogTag {
+  blogId   String
+  tagId    String
+  position Int
+
+  blog Blog @relation(fields: [blogId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([blogId, tagId])
+  @@index([tagId])
+}
+
+model BlogLocale {
+  id           String @id @default(cuid())
+  blogId       String
+  // Denormalised from Blog so the slug uniqueness constraint can be a database index
+  spaceId      String
+  languageCode String
+
+  title       String
+  description String
+  slug        String
+  // Nullable because a post is created before it is written. 120–600 is a publish gate, not a save
+  // gate: publishing is the explicit act, and a summary cannot be written before the post is.
+  summary     String?
+  updateNote  String?
+  body        Json
+  faq         Json    @default("[]")
+
+  status          LocaleStatus @default(DRAFT)
+  revision        Int          @default(1)
+  // The last revision whose translatable text or shared fields changed. A translation is
+  // Stale when its sourceRevision is behind this on the source language — a save that
+  // changed nothing does not make twenty languages look out of date.
+  contentRevision Int          @default(1)
+  // The source revision this was translated from. Lower than the source's current revision means
+  // the translation is Stale.
+  sourceRevision  Int?
+  // What each translated field was made from: a fingerprint of the source text per field. The
+  // translation owns it, so a clone, a duplicate or an import keeps it, and a field with no
+  // entry was written by hand and is not overwritten by a translate.
+  sourceBaseline  Json?
+
+  firstPublishedAt  DateTime?
+  publishedAt       DateTime?
+  publishedRevision Int?
+  submittedById     String?
+  submittedAt       DateTime?
+  reviewNote        String?
+  reviewedById      String?
+  reviewedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  blog     Blog          @relation(fields: [blogId], references: [id], onDelete: Cascade)
+  versions BlogVersion[]
+
+  space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  submittedBy CmsUser? @relation("BlogLocaleSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  reviewedBy  CmsUser? @relation("BlogLocaleReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([blogId, languageCode])
+  @@unique([spaceId, languageCode, slug])
+  @@index([spaceId, languageCode, status])
+  @@index([status])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+model BlogVersion {
+  id           String   @id @default(cuid())
+  blogLocaleId String
+  revision     Int
+  snapshot     Json
+  note         String?
+  createdById  String?
+  createdAt    DateTime @default(now())
+
+  locale BlogLocale @relation(fields: [blogLocaleId], references: [id], onDelete: Cascade)
+
+  @@unique([blogLocaleId, revision])
+}
+
+model Category {
+  id              String    @id @default(cuid())
+  spaceId         String
+  slug            String
+  gameCode        String
+  featuredImageId String?
+  featureIconId   String?
+  gameCoverId     String?
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  space         Space  @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  featuredImage Media? @relation("CategoryFeaturedImage", fields: [featuredImageId], references: [id])
+  featureIcon   Media? @relation("CategoryFeatureIcon", fields: [featureIconId], references: [id])
+  gameCover     Media? @relation("CategoryGameCover", fields: [gameCoverId], references: [id])
+
+  locales CategoryLocale[]
+  blogs   Blog[]
+
+  createdBy CmsUser? @relation("CategoryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([spaceId, slug])
+  @@index([spaceId, deletedAt])
+}
+
+model CategoryLocale {
+  id           String @id @default(cuid())
+  categoryId   String
+  spaceId      String
+  languageCode String
+
+  title              String
+  description        String
+  seoMetaTitle       String?
+  seoMetaDescription String?
+
+  status          LocaleStatus @default(DRAFT)
+  revision        Int          @default(1)
+  contentRevision Int          @default(1)
+  sourceRevision  Int?
+  sourceBaseline  Json?
+
+  firstPublishedAt  DateTime?
+  publishedAt       DateTime?
+  publishedRevision Int?
+  submittedById     String?
+  submittedAt       DateTime?
+  reviewNote        String?
+  reviewedById      String?
+  reviewedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  category Category          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  versions CategoryVersion[]
+
+  space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  submittedBy CmsUser? @relation("CategoryLocaleSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  reviewedBy  CmsUser? @relation("CategoryLocaleReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([categoryId, languageCode])
+  @@unique([spaceId, languageCode, seoMetaTitle])
+  @@index([spaceId, languageCode, status])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+model CategoryVersion {
+  id               String   @id @default(cuid())
+  categoryLocaleId String
+  revision         Int
+  snapshot         Json
+  note             String?
+  createdById      String?
+  createdAt        DateTime @default(now())
+
+  locale CategoryLocale @relation(fields: [categoryLocaleId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryLocaleId, revision])
+}
+
+model Tag {
+  id              String    @id @default(cuid())
+  spaceId         String
+  slug            String
+  featuredImageId String?
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  space         Space  @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  featuredImage Media? @relation("TagFeaturedImage", fields: [featuredImageId], references: [id])
+
+  locales TagLocale[]
+  blogs   BlogTag[]
+
+  createdBy CmsUser? @relation("TagCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([spaceId, slug])
+  @@index([spaceId, deletedAt])
+}
+
+model TagLocale {
+  id           String @id @default(cuid())
+  tagId        String
+  spaceId      String
+  languageCode String
+
+  title       String
+  description String
+
+  status          LocaleStatus @default(DRAFT)
+  revision        Int          @default(1)
+  contentRevision Int          @default(1)
+  sourceRevision  Int?
+  sourceBaseline  Json?
+
+  firstPublishedAt  DateTime?
+  publishedAt       DateTime?
+  publishedRevision Int?
+  submittedById     String?
+  submittedAt       DateTime?
+  reviewNote        String?
+  reviewedById      String?
+  reviewedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  tag      Tag          @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  versions TagVersion[]
+
+  space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  submittedBy CmsUser? @relation("TagLocaleSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  reviewedBy  CmsUser? @relation("TagLocaleReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([tagId, languageCode])
+  @@index([spaceId, languageCode, status])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+model TagVersion {
+  id          String   @id @default(cuid())
+  tagLocaleId String
+  revision    Int
+  snapshot    Json
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  locale TagLocale @relation(fields: [tagLocaleId], references: [id], onDelete: Cascade)
+
+  @@unique([tagLocaleId, revision])
+}
+
+// A blog byline — unrelated to the AUTHOR role
+model Author {
+  id             String    @id @default(cuid())
+  spaceId        String
+  name           String
+  profileImageId String?
+  socialLinks    String[]  @default([])
+  createdById    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  space        Space  @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  profileImage Media? @relation("AuthorProfileImage", fields: [profileImageId], references: [id])
+
+  locales       AuthorLocale[]
+  authoredBlogs Blog[]         @relation("BlogAuthor")
+  reviewedBlogs Blog[]         @relation("BlogReviewer")
+
+  createdBy CmsUser? @relation("AuthorCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([spaceId, deletedAt])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+model AuthorLocale {
+  id           String @id @default(cuid())
+  authorId     String
+  spaceId      String
+  languageCode String
+
+  jobTitle String?
+  bio      String?
+
+  status          LocaleStatus @default(DRAFT)
+  revision        Int          @default(1)
+  contentRevision Int          @default(1)
+  sourceRevision  Int?
+  sourceBaseline  Json?
+
+  firstPublishedAt  DateTime?
+  publishedAt       DateTime?
+  publishedRevision Int?
+  submittedById     String?
+  submittedAt       DateTime?
+  reviewNote        String?
+  reviewedById      String?
+  reviewedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  author   Author          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  versions AuthorVersion[]
+
+  space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  submittedBy CmsUser? @relation("AuthorLocaleSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  reviewedBy  CmsUser? @relation("AuthorLocaleReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([authorId, languageCode])
+  @@index([spaceId, languageCode, status])
+}
+
+model AuthorVersion {
+  id             String   @id @default(cuid())
+  authorLocaleId String
+  revision       Int
+  snapshot       Json
+  note           String?
+  createdById    String?
+  createdAt      DateTime @default(now())
+
+  locale AuthorLocale @relation(fields: [authorLocaleId], references: [id], onDelete: Cascade)
+
+  @@unique([authorLocaleId, revision])
+}
+
+model Cta {
+  id          String    @id @default(cuid())
+  spaceId     String
+  url         String
+  cmpid       String?
+  imageId     String?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  space Space  @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  image Media? @relation("CtaImage", fields: [imageId], references: [id])
+
+  locales CtaLocale[]
+
+  createdBy CmsUser? @relation("CtaCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([spaceId, deletedAt])
+  // An index, not a unique: one campaign legitimately runs two creatives under one cmpid,
+  // and nothing resolves a CTA by it — they are reached only through a Blog body embed.
+  @@index([spaceId, cmpid])
+}
+
+model CtaLocale {
+  id           String @id @default(cuid())
+  ctaId        String
+  spaceId      String
+  languageCode String
+
+  title       String
+  description String?
+  buttonLabel String
+
+  status          LocaleStatus @default(DRAFT)
+  revision        Int          @default(1)
+  contentRevision Int          @default(1)
+  sourceRevision  Int?
+  sourceBaseline  Json?
+
+  firstPublishedAt  DateTime?
+  publishedAt       DateTime?
+  publishedRevision Int?
+  submittedById     String?
+  submittedAt       DateTime?
+  reviewNote        String?
+  reviewedById      String?
+  reviewedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  cta      Cta          @relation(fields: [ctaId], references: [id], onDelete: Cascade)
+  versions CtaVersion[]
+
+  space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  submittedBy CmsUser? @relation("CtaLocaleSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  reviewedBy  CmsUser? @relation("CtaLocaleReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([ctaId, languageCode])
+  @@index([spaceId, languageCode, status])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+model CtaVersion {
+  id          String   @id @default(cuid())
+  ctaLocaleId String
+  revision    Int
+  snapshot    Json
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  locale CtaLocale @relation(fields: [ctaLocaleId], references: [id], onDelete: Cascade)
+
+  @@unique([ctaLocaleId, revision])
+}
+
+model FeaturedArticles {
+  id          String    @id @default(cuid())
+  spaceId     String    @unique
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  space   Space                    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  locales FeaturedArticlesLocale[]
+
+  createdBy CmsUser? @relation("FeaturedArticlesCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+}
+
+model FeaturedArticlesLocale {
+  id                 String @id @default(cuid())
+  featuredArticlesId String
+  spaceId            String
+  languageCode       String
+
+  status          LocaleStatus @default(DRAFT)
+  revision        Int          @default(1)
+  contentRevision Int          @default(1)
+  sourceRevision  Int?
+  sourceBaseline  Json?
+
+  firstPublishedAt  DateTime?
+  publishedAt       DateTime?
+  publishedRevision Int?
+  submittedById     String?
+  submittedAt       DateTime?
+  reviewNote        String?
+  reviewedById      String?
+  reviewedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  featuredArticles FeaturedArticles          @relation(fields: [featuredArticlesId], references: [id], onDelete: Cascade)
+  items            FeaturedArticlesItem[]
+  versions         FeaturedArticlesVersion[]
+
+  space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  submittedBy CmsUser? @relation("FeaturedArticlesLocaleSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  reviewedBy  CmsUser? @relation("FeaturedArticlesLocaleReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([featuredArticlesId, languageCode])
+  @@index([spaceId, languageCode, status])
+}
+
+model FeaturedArticlesItem {
+  id       String @id @default(cuid())
+  localeId String
+  blogId   String
+  position Int
+
+  locale FeaturedArticlesLocale @relation(fields: [localeId], references: [id], onDelete: Cascade)
+  blog   Blog                   @relation(fields: [blogId], references: [id], onDelete: Cascade)
+
+  @@unique([localeId, blogId])
+  @@index([blogId])
+}
+
+model FeaturedArticlesVersion {
+  id                       String   @id @default(cuid())
+  featuredArticlesLocaleId String
+  revision                 Int
+  snapshot                 Json
+  note                     String?
+  createdById              String?
+  createdAt                DateTime @default(now())
+
+  locale FeaturedArticlesLocale @relation(fields: [featuredArticlesLocaleId], references: [id], onDelete: Cascade)
+
+  @@unique([featuredArticlesLocaleId, revision])
+}
+
+model ApiKey {
+  id                 String    @id @default(cuid())
+  siteId             String
+  name               String
+  keyHash            String    @unique
+  keyPrefix          String
+  rateLimitPerMinute Int       @default(600)
+  /// Whether this key may read drafts (`?preview=true`). Off by default: a website's production key
+  /// never sees unpublished content, only the key it uses while in draft mode does.
+  canPreview         Boolean   @default(false)
+  lastUsedAt         DateTime?
+  revokedAt          DateTime?
+  createdById        String?
+  createdAt          DateTime  @default(now())
+
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  createdBy CmsUser? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([siteId, revokedAt])
+}
+
+/// Lets an MCP client (Claude, an editor's assistant) act as one person through /mcp. It belongs
+/// to that person, not to a Site: it can do what their role can, in every Site, and stops working
+/// when they are disabled or deleted. Only a hash is stored; the token is shown once.
+model McpToken {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  tokenHash   String    @unique
+  tokenPrefix String
+  lastUsedAt  DateTime?
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  user CmsUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+}
+
+model AuditLog {
+  id String @id @default(cuid())
+
+  userId    String?
+  // Kept flat so history stays readable after a user row is deleted
+  userEmail String
+
+  action       AuditAction
+  contentType  CmsContentType?
+  contentId    String?
+  languageCode String?
+  spaceId      String?
+  metadata     Json            @default("{}")
+  createdAt    DateTime        @default(now())
+
+  user CmsUser? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId])
+  @@index([contentType, contentId])
+  @@index([spaceId, createdAt])
+}
+
+model TranslationUsage {
+  id           String         @id @default(cuid())
+  siteId       String
+  languageCode String
+  contentType  CmsContentType
+  contentId    String
+  characters   Int
+  userId       String?
+  createdAt    DateTime       @default(now())
+
+  site Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  user CmsUser? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([siteId, createdAt])
+}

@@ -1,0 +1,57 @@
+{
+  "name": "@loom/database",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./credentials": {
+      "types": "./dist/credentials.d.ts",
+      "default": "./dist/credentials.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "credentials": [
+        "./dist/credentials.d.ts"
+      ]
+    }
+  },
+  "files": [
+    "dist",
+    "generated"
+  ],
+  "scripts": {
+    "prepare": "pnpm build",
+    "build": "pnpm generate && tsc",
+    "generate": "prisma generate",
+    "migrate": "prisma migrate dev",
+    "deploy": "prisma migrate deploy",
+    "seed": "prisma db seed",
+    "admin:invite": "tsx --env-file-if-exists=.env prisma/invite-admin.ts",
+    "studio": "prisma studio",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write ."
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "catalog:prisma"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "prisma": "catalog:prisma",
+    "tsx": "^4.19.3",
+    "typescript": "catalog:"
+  }
+}

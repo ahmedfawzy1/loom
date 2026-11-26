@@ -1,0 +1,1 @@
+export const DASHBOARD_RECENT_EDITS = 10;

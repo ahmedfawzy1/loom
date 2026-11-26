@@ -1,0 +1,1 @@
+export const ACTIVITY_DEFAULT_PAGE_SIZE = 50;

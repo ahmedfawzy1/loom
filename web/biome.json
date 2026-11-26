@@ -1,0 +1,21 @@
+{
+  "extends": "//",
+  "files": {
+    "includes": ["**", "!src/app/globals.css"]
+  },
+  "linter": {
+    "rules": {
+      "style": {
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "@loom/database": "Import database types and enums from @loom/dto/models. The web app depends only on @loom/dto.",
+              "@loom/database/client": "The web app reaches the database only through the API."
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "extends": "//",
+  "files": {
+    "includes": ["**", "!**/*.d.ts"]
+  },
+  "linter": {
+    "rules": {
+      "style": {
+        "useImportType": "off"
+      }
+    }
+  },
+  "javascript": {
+    "parser": {
+      "unsafeParameterDecoratorsEnabled": true
+    }
+  }
+}

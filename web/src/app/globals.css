@@ -1,0 +1,252 @@
+@import "tailwindcss";
+@import "@heroui/styles";
+@plugin "@tailwindcss/typography";
+
+/* Paper and ink, in two themes: dark (the default) and light, picked per person in Settings →
+   Appearance. Every neutral carries hue 250 so nothing reads as raw grey, and the one accent is ink
+   blue — the public site's red never appears here, so the CMS can't be mistaken for it. Semantic
+   tokens live in cascade land, not in @theme: HeroUI's `@theme inline` block maps
+   --color-background → var(--background). */
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  --background: oklch(98.2% 0.003 250);
+  --foreground: oklch(23% 0.02 258);
+
+  --surface: oklch(99.7% 0.0015 250);
+  --surface-foreground: var(--foreground);
+  --surface-secondary: oklch(96.9% 0.004 250);
+  --surface-secondary-foreground: var(--foreground);
+  --surface-tertiary: oklch(94.6% 0.006 250);
+  --surface-tertiary-foreground: var(--foreground);
+
+  --overlay: oklch(99.8% 0.001 250);
+  --overlay-foreground: var(--foreground);
+
+  --default: oklch(95% 0.005 250);
+  --default-foreground: var(--foreground);
+
+  --accent: oklch(52% 0.16 257);
+  --accent-foreground: oklch(99% 0.003 250);
+  --accent-soft: oklch(95.5% 0.025 257);
+  --accent-soft-foreground: oklch(44% 0.15 257);
+
+  --field-background: oklch(99.7% 0.0015 250);
+  --field-foreground: var(--foreground);
+  --field-placeholder: oklch(62% 0.012 255);
+  --field-border: oklch(89.5% 0.007 250);
+  --field-border-width: 1px;
+  --field-radius: 0.5rem;
+
+  --success: oklch(62% 0.15 155);
+  --success-foreground: oklch(99% 0.003 250);
+  --success-soft: oklch(95.5% 0.04 155);
+  --success-soft-foreground: oklch(42% 0.11 155);
+  --warning: oklch(72% 0.15 70);
+  --warning-foreground: oklch(25% 0.04 70);
+  --warning-soft: oklch(96% 0.045 80);
+  --warning-soft-foreground: oklch(46% 0.11 60);
+  --danger: oklch(56% 0.2 27);
+  --danger-foreground: oklch(99% 0.003 250);
+  --danger-soft: oklch(96% 0.025 27);
+  --danger-soft-foreground: oklch(48% 0.18 27);
+
+  --segment: oklch(99.7% 0.0015 250);
+  --segment-foreground: var(--foreground);
+
+  --muted: oklch(51% 0.016 255);
+  --scrollbar: oklch(80% 0.01 250);
+  --border: oklch(91.5% 0.006 250);
+  --separator: oklch(93.5% 0.005 250);
+  --focus: var(--accent);
+  --link: var(--accent);
+  --backdrop: oklch(25% 0.02 258 / 0.32);
+
+  /* Flat at rest: hairlines separate surfaces. Only what floats above the page casts a shadow. */
+  --surface-shadow: 0 0 0 0 transparent;
+  --field-shadow: 0 0 0 0 transparent;
+  --overlay-shadow:
+    0 0 0 1px oklch(25% 0.02 258 / 0.07), 0 12px 32px -8px oklch(25% 0.02 258 / 0.18);
+
+  /* The sidebar's own neutral, one step deeper than the page it frames */
+  --sidebar: oklch(96.4% 0.006 250);
+  /* In review: violet, so it never reads as the ink-blue accent or as a status of success */
+  --review: oklch(52% 0.17 295);
+  --review-soft: oklch(95.5% 0.03 295);
+
+  --radius: 0.5rem;
+}
+
+/* Ink: the same ladder lit from below. Accents rise in lightness so they hold contrast on the dark
+   surfaces; the soft tints drop to low-lightness washes of the same hue. After the light block, so
+   the attribute wins over :root at equal specificity. */
+.dark,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --background: oklch(15.5% 0.011 255);
+  --foreground: oklch(94% 0.006 250);
+
+  --surface: oklch(19.5% 0.012 255);
+  --surface-foreground: var(--foreground);
+  --surface-secondary: oklch(22.5% 0.013 255);
+  --surface-secondary-foreground: var(--foreground);
+  --surface-tertiary: oklch(26.5% 0.014 255);
+  --surface-tertiary-foreground: var(--foreground);
+
+  --overlay: oklch(21.5% 0.013 255);
+  --overlay-foreground: var(--foreground);
+
+  --default: oklch(26% 0.014 255);
+  --default-foreground: var(--foreground);
+
+  --accent: oklch(62% 0.16 257);
+  --accent-foreground: oklch(99% 0.003 250);
+  --accent-soft: oklch(29% 0.07 257);
+  --accent-soft-foreground: oklch(84% 0.08 257);
+
+  --field-background: oklch(17.5% 0.012 255);
+  --field-foreground: var(--foreground);
+  --field-placeholder: oklch(55% 0.012 255);
+  --field-border: oklch(30% 0.014 255);
+
+  --success: oklch(70% 0.15 155);
+  --success-foreground: oklch(18% 0.03 155);
+  --success-soft: oklch(28% 0.06 155);
+  --success-soft-foreground: oklch(84% 0.11 155);
+  --warning: oklch(78% 0.14 75);
+  --warning-foreground: oklch(22% 0.04 70);
+  --warning-soft: oklch(30% 0.06 75);
+  --warning-soft-foreground: oklch(86% 0.1 80);
+  --danger: oklch(64% 0.19 27);
+  --danger-foreground: oklch(99% 0.003 250);
+  --danger-soft: oklch(29% 0.08 27);
+  --danger-soft-foreground: oklch(82% 0.1 27);
+
+  --segment: oklch(26.5% 0.014 255);
+  --segment-foreground: var(--foreground);
+
+  --muted: oklch(70% 0.014 255);
+  --scrollbar: oklch(40% 0.014 255);
+  --border: oklch(27% 0.013 255);
+  --separator: oklch(24.5% 0.013 255);
+  --backdrop: oklch(8% 0.01 258 / 0.6);
+
+  --overlay-shadow:
+    0 0 0 1px oklch(100% 0 0 / 0.07), 0 16px 40px -8px oklch(0% 0 0 / 0.55);
+
+  --sidebar: oklch(13.5% 0.011 255);
+  --review: oklch(74% 0.13 295);
+  --review-soft: oklch(30% 0.08 295);
+}
+
+/* Theme-dependent colours outside HeroUI's set, as utilities that follow the tokens above */
+@theme inline {
+  --color-sidebar: var(--sidebar);
+  --color-review: var(--review);
+  --color-review-soft: var(--review-soft);
+}
+
+@theme {
+  --font-sans: var(--font-rubik), ui-sans-serif, system-ui, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+
+  /* --ease-brand, not --ease-out: Tailwind owns --ease-out, and redefining it silently retargets
+     every `ease-out` utility in the app. */
+  --ease-brand: cubic-bezier(0.25, 1, 0.5, 1);
+
+  /* Tailwind's duration-* utility reads --transition-duration-*; a --duration-* token generates
+     no utility at all. */
+  --transition-duration-fast: 150ms;
+  --transition-duration-base: 200ms;
+}
+
+@layer components {
+  /* HeroUI's pill buttons read as a consumer app; a tool squares them off to match the fields */
+  .button {
+    @apply rounded-lg;
+  }
+
+  /* HeroUI outlines these with --field-shadow, which is flat here, so they take the field's border */
+  .checkbox__control,
+  .radio__control {
+    @apply border border-field-border;
+  }
+}
+
+@layer base {
+  html {
+    font-size: 16px;
+  }
+
+  ::selection {
+    background-color: var(--accent-soft);
+    color: var(--foreground);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--scrollbar) 70%, transparent);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    border-radius: 99px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar);
+  }
+
+  /* Scoped rather than *:focus-visible — HeroUI draws its own ring on every control and the two
+     would stack. These are the raw interactive elements the shell builds by hand. */
+  [data-nav]:focus-visible,
+  [data-row]:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+
+  /* Links to an entry or an image, rather than a URL — dotted and dashed so an editor can tell
+     them from ordinary links at a glance. The schema is shared with the API, so it carries no
+     styling of its own. */
+  .ProseMirror a[data-entry-link],
+  .ProseMirror a[data-asset-link] {
+    color: var(--accent);
+    text-decoration-line: underline;
+  }
+
+  .ProseMirror a[data-entry-link] {
+    text-decoration-style: dotted;
+  }
+
+  .ProseMirror a[data-asset-link] {
+    text-decoration-style: dashed;
+  }
+}
+
+/* The body editor's prose, in the theme's ink rather than typography's own greys. Unlayered, so it
+   wins over the plugin's own .prose colours in either theme. */
+.prose {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-lead: var(--muted);
+  --tw-prose-links: var(--accent);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-counters: var(--muted);
+  --tw-prose-bullets: var(--muted);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--foreground);
+  --tw-prose-quote-borders: var(--border);
+  --tw-prose-captions: var(--muted);
+  --tw-prose-code: var(--foreground);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--separator);
+}

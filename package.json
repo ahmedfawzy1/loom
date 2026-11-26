@@ -1,0 +1,35 @@
+{
+  "name": "loom",
+  "private": true,
+  "scripts": {
+    "infra:up": "docker compose -f compose.dev.yaml up -d --wait postgres minio && docker compose -f compose.dev.yaml run --rm minio-init",
+    "infra:down": "docker compose -f compose.dev.yaml down",
+    "infra:logs": "docker compose -f compose.dev.yaml logs -f",
+    "db:migrate": "pnpm --filter @loom/database run deploy",
+    "db:migrate:dev": "pnpm --filter @loom/database run migrate",
+    "db:seed": "pnpm --filter @loom/database run seed",
+    "db:seed:demo": "node --env-file-if-exists=packages/database/.env scripts/seed-demo.mjs",
+    "db:reset": "pnpm --filter @loom/database exec prisma migrate reset --force",
+    "db:studio": "pnpm --filter @loom/database run studio",
+    "admin:invite": "pnpm --filter @loom/database run admin:invite",
+    "bootstrap": "pnpm infra:up && pnpm db:migrate && pnpm db:seed",
+    "build:packages": "pnpm --filter @loom/database --filter @loom/dto run build",
+    "dev": "pnpm --parallel --filter @loom/api --filter @loom/web run dev",
+    "dev:api": "pnpm --filter @loom/api run dev",
+    "dev:web": "pnpm --filter @loom/web run dev",
+    "build": "pnpm build:packages && pnpm --filter @loom/api --filter @loom/web run build",
+    "start:api": "pnpm --filter @loom/api run start",
+    "start:web": "pnpm --filter @loom/web run start",
+    "typecheck": "pnpm --filter @loom/api --filter @loom/web run typecheck",
+    "test": "pnpm --filter @loom/api run test",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write ."
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.6",
+    "typescript": "catalog:"
+  }
+}

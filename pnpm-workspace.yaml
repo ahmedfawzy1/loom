@@ -1,0 +1,23 @@
+packages:
+  - "api"
+  - "web"
+  - "packages/*"
+
+catalogs:
+  default:
+    typescript: ^5.8.3
+    zod: ^4.3.6
+  # The Prisma CLI and client must be the same version
+  prisma:
+    prisma: 6.5.0
+    "@prisma/client": 6.5.0
+  # The web editor and the rich-text schema the API validates bodies against (packages/dto) must be
+  # built from the same Tiptap, or they disagree about what a valid body is
+  tiptap:
+    "@tiptap/core": ^3.31.3
+    "@tiptap/extension-subscript": ^3.31.3
+    "@tiptap/extension-superscript": ^3.31.3
+    "@tiptap/extension-table": ^3.31.3
+    "@tiptap/pm": ^3.31.3
+    "@tiptap/react": ^3.31.3
+    "@tiptap/starter-kit": ^3.31.3
